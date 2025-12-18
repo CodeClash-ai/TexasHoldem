@@ -3,6 +3,8 @@
 Texas Hold'em Poker Engine for CodeClash
 
 This engine runs heads-up (2-player) No-Limit Texas Hold'em poker games.
+Supports both classic (52-card) and short-deck/six-plus (36-card) variants.
+
 Each player bot receives game state and must return an action (fold, call, raise).
 """
 
@@ -11,13 +13,20 @@ import importlib.util
 import os
 import random
 import sys
+from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import IntEnum
+from itertools import combinations
 from typing import Callable
 
 
+# =============================================================================
+# Hand Rankings
+# =============================================================================
+
 class HandRank(IntEnum):
+    """Standard poker hand rankings."""
     HIGH_CARD = 0
     PAIR = 1
     TWO_PAIR = 2
@@ -30,131 +39,248 @@ class HandRank(IntEnum):
     ROYAL_FLUSH = 9
 
 
-RANKS = "23456789TJQKA"
-SUITS = "cdhs"  # clubs, diamonds, hearts, spades
+class ShortDeckHandRank(IntEnum):
+    """Short-deck hand rankings (flush beats full house)."""
+    HIGH_CARD = 0
+    PAIR = 1
+    TWO_PAIR = 2
+    THREE_OF_A_KIND = 3
+    STRAIGHT = 4
+    FULL_HOUSE = 5  # Full house is BELOW flush in short deck
+    FLUSH = 6       # Flush is ABOVE full house in short deck
+    FOUR_OF_A_KIND = 7
+    STRAIGHT_FLUSH = 8
+    ROYAL_FLUSH = 9
+
+
+# =============================================================================
+# Hand Evaluator Classes
+# =============================================================================
+
+class HandEvaluator(ABC):
+    """Abstract base class for poker hand evaluation."""
+
+    RANKS: str  # Card ranks from lowest to highest
+    SUITS: str = "cdhs"  # clubs, diamonds, hearts, spades
+
+    @classmethod
+    def create_deck(cls) -> list[str]:
+        """Create a deck with the configured ranks."""
+        return [r + s for r in cls.RANKS for s in cls.SUITS]
+
+    @classmethod
+    def rank_value(cls, card: str) -> int:
+        """Get numeric value of card rank."""
+        return cls.RANKS.index(card[0])
+
+    @classmethod
+    def suit_value(cls, card: str) -> str:
+        """Get suit of card."""
+        return card[1]
+
+    @classmethod
+    @abstractmethod
+    def get_hand_rank_enum(cls) -> type[IntEnum]:
+        """Return the appropriate HandRank enum for this evaluator."""
+        pass
+
+    @classmethod
+    @abstractmethod
+    def get_wheel_ranks(cls) -> list[int]:
+        """Return the rank indices for the wheel (lowest straight)."""
+        pass
+
+    @classmethod
+    def evaluate_hand(cls, cards: list[str]) -> tuple[IntEnum, list[int]]:
+        """
+        Evaluate a poker hand (5-7 cards) and return (HandRank, tiebreaker_values).
+        Returns the best possible 5-card hand from the given cards.
+        """
+        if len(cards) < 5:
+            raise ValueError("Need at least 5 cards to evaluate")
+
+        HandRankEnum = cls.get_hand_rank_enum()
+        best_rank = HandRankEnum.HIGH_CARD
+        best_tiebreaker: list[int] = []
+
+        for combo in combinations(cards, 5):
+            rank, tiebreaker = cls._evaluate_five_cards(list(combo))
+            if rank > best_rank or (rank == best_rank and tiebreaker > best_tiebreaker):
+                best_rank = rank
+                best_tiebreaker = tiebreaker
+
+        return best_rank, best_tiebreaker
+
+    @classmethod
+    def _evaluate_five_cards(cls, cards: list[str]) -> tuple[IntEnum, list[int]]:
+        """Evaluate exactly 5 cards."""
+        HandRankEnum = cls.get_hand_rank_enum()
+
+        ranks = sorted([cls.rank_value(c) for c in cards], reverse=True)
+        suits = [cls.suit_value(c) for c in cards]
+        rank_counts = Counter(ranks)
+        is_flush = len(set(suits)) == 1
+
+        # Check for straight
+        sorted_ranks = sorted(set(ranks))
+        is_straight = False
+        straight_high = 0
+
+        if len(sorted_ranks) == 5:
+            if sorted_ranks[-1] - sorted_ranks[0] == 4:
+                is_straight = True
+                straight_high = sorted_ranks[-1]
+            # Check for wheel (lowest straight)
+            wheel_ranks = cls.get_wheel_ranks()
+            if sorted_ranks == wheel_ranks:
+                is_straight = True
+                straight_high = wheel_ranks[-2]  # Second highest is the "high" for wheel
+
+        counts = sorted(rank_counts.values(), reverse=True)
+
+        # Determine hand rank
+        if is_straight and is_flush:
+            # Royal flush check: highest straight flush
+            ace_index = len(cls.RANKS) - 1
+            ten_index = cls.RANKS.index('T')
+            if straight_high == ace_index and ten_index in ranks:
+                return HandRankEnum.ROYAL_FLUSH, [straight_high]
+            return HandRankEnum.STRAIGHT_FLUSH, [straight_high]
+
+        if counts == [4, 1]:
+            quad_rank = [r for r, c in rank_counts.items() if c == 4][0]
+            kicker = [r for r, c in rank_counts.items() if c == 1][0]
+            return HandRankEnum.FOUR_OF_A_KIND, [quad_rank, kicker]
+
+        if counts == [3, 2]:
+            trip_rank = [r for r, c in rank_counts.items() if c == 3][0]
+            pair_rank = [r for r, c in rank_counts.items() if c == 2][0]
+            return HandRankEnum.FULL_HOUSE, [trip_rank, pair_rank]
+
+        if is_flush:
+            return HandRankEnum.FLUSH, ranks
+
+        if is_straight:
+            return HandRankEnum.STRAIGHT, [straight_high]
+
+        if counts == [3, 1, 1]:
+            trip_rank = [r for r, c in rank_counts.items() if c == 3][0]
+            kickers = sorted([r for r, c in rank_counts.items() if c == 1], reverse=True)
+            return HandRankEnum.THREE_OF_A_KIND, [trip_rank] + kickers
+
+        if counts == [2, 2, 1]:
+            pairs = sorted([r for r, c in rank_counts.items() if c == 2], reverse=True)
+            kicker = [r for r, c in rank_counts.items() if c == 1][0]
+            return HandRankEnum.TWO_PAIR, pairs + [kicker]
+
+        if counts == [2, 1, 1, 1]:
+            pair_rank = [r for r, c in rank_counts.items() if c == 2][0]
+            kickers = sorted([r for r, c in rank_counts.items() if c == 1], reverse=True)
+            return HandRankEnum.PAIR, [pair_rank] + kickers
+
+        return HandRankEnum.HIGH_CARD, ranks
+
+    @classmethod
+    def compare_hands(cls, hand1: list[str], hand2: list[str]) -> int:
+        """
+        Compare two hands. Returns:
+        - 1 if hand1 wins
+        - -1 if hand2 wins
+        - 0 if tie
+        """
+        rank1, tie1 = cls.evaluate_hand(hand1)
+        rank2, tie2 = cls.evaluate_hand(hand2)
+
+        if rank1 > rank2:
+            return 1
+        if rank1 < rank2:
+            return -1
+        if tie1 > tie2:
+            return 1
+        if tie1 < tie2:
+            return -1
+        return 0
+
+
+class ClassicHandEvaluator(HandEvaluator):
+    """Hand evaluator for classic 52-card Texas Hold'em."""
+
+    RANKS = "23456789TJQKA"  # 13 ranks × 4 suits = 52 cards
+
+    @classmethod
+    def get_hand_rank_enum(cls) -> type[IntEnum]:
+        return HandRank
+
+    @classmethod
+    def get_wheel_ranks(cls) -> list[int]:
+        # A-2-3-4-5 wheel: indices [0, 1, 2, 3, 12]
+        return [0, 1, 2, 3, 12]
+
+
+class ShortDeckHandEvaluator(HandEvaluator):
+    """
+    Hand evaluator for Short-deck (Six-plus) Hold'em.
+
+    Key differences from classic:
+    - 36-card deck (6 through Ace, removing 2-5)
+    - Flush beats Full House (flushes are harder to make)
+    - A-6-7-8-9 is the lowest straight (wheel)
+    """
+
+    RANKS = "6789TJQKA"  # 9 ranks × 4 suits = 36 cards
+
+    @classmethod
+    def get_hand_rank_enum(cls) -> type[IntEnum]:
+        return ShortDeckHandRank
+
+    @classmethod
+    def get_wheel_ranks(cls) -> list[int]:
+        # A-6-7-8-9 wheel in short deck: indices [0, 1, 2, 3, 8] (6=0, 7=1, 8=2, 9=3, A=8)
+        return [0, 1, 2, 3, 8]
+
+
+# =============================================================================
+# Backward Compatibility - Module-level functions using classic evaluator
+# =============================================================================
+
+RANKS = ClassicHandEvaluator.RANKS
+SUITS = ClassicHandEvaluator.SUITS
 
 
 def create_deck() -> list[str]:
     """Create a standard 52-card deck."""
-    return [r + s for r in RANKS for s in SUITS]
+    return ClassicHandEvaluator.create_deck()
 
 
 def rank_value(card: str) -> int:
     """Get numeric value of card rank (2=0, 3=1, ..., A=12)."""
-    return RANKS.index(card[0])
+    return ClassicHandEvaluator.rank_value(card)
 
 
 def suit_value(card: str) -> str:
     """Get suit of card."""
-    return card[1]
+    return ClassicHandEvaluator.suit_value(card)
 
 
 def evaluate_hand(cards: list[str]) -> tuple[HandRank, list[int]]:
-    """
-    Evaluate a poker hand (5-7 cards) and return (HandRank, tiebreaker_values).
-    Returns the best possible 5-card hand from the given cards.
-    """
-    if len(cards) < 5:
-        raise ValueError("Need at least 5 cards to evaluate")
-
-    best_rank = HandRank.HIGH_CARD
-    best_tiebreaker: list[int] = []
-
-    # Generate all 5-card combinations
-    from itertools import combinations
-
-    for combo in combinations(cards, 5):
-        rank, tiebreaker = _evaluate_five_cards(list(combo))
-        if rank > best_rank or (rank == best_rank and tiebreaker > best_tiebreaker):
-            best_rank = rank
-            best_tiebreaker = tiebreaker
-
-    return best_rank, best_tiebreaker
-
-
-def _evaluate_five_cards(cards: list[str]) -> tuple[HandRank, list[int]]:
-    """Evaluate exactly 5 cards."""
-    ranks = sorted([rank_value(c) for c in cards], reverse=True)
-    suits = [suit_value(c) for c in cards]
-    rank_counts = Counter(ranks)
-    is_flush = len(set(suits)) == 1
-
-    # Check for straight (including wheel: A-2-3-4-5)
-    sorted_ranks = sorted(set(ranks))
-    is_straight = False
-    straight_high = 0
-
-    if len(sorted_ranks) == 5:
-        if sorted_ranks[-1] - sorted_ranks[0] == 4:
-            is_straight = True
-            straight_high = sorted_ranks[-1]
-        # Wheel (A-2-3-4-5)
-        elif sorted_ranks == [0, 1, 2, 3, 12]:
-            is_straight = True
-            straight_high = 3  # 5-high straight
-
-    counts = sorted(rank_counts.values(), reverse=True)
-
-    # Determine hand rank
-    if is_straight and is_flush:
-        if straight_high == 12 and 8 in ranks:  # Royal flush (10-J-Q-K-A)
-            return HandRank.ROYAL_FLUSH, [straight_high]
-        return HandRank.STRAIGHT_FLUSH, [straight_high]
-
-    if counts == [4, 1]:
-        quad_rank = [r for r, c in rank_counts.items() if c == 4][0]
-        kicker = [r for r, c in rank_counts.items() if c == 1][0]
-        return HandRank.FOUR_OF_A_KIND, [quad_rank, kicker]
-
-    if counts == [3, 2]:
-        trip_rank = [r for r, c in rank_counts.items() if c == 3][0]
-        pair_rank = [r for r, c in rank_counts.items() if c == 2][0]
-        return HandRank.FULL_HOUSE, [trip_rank, pair_rank]
-
-    if is_flush:
-        return HandRank.FLUSH, ranks
-
-    if is_straight:
-        return HandRank.STRAIGHT, [straight_high]
-
-    if counts == [3, 1, 1]:
-        trip_rank = [r for r, c in rank_counts.items() if c == 3][0]
-        kickers = sorted([r for r, c in rank_counts.items() if c == 1], reverse=True)
-        return HandRank.THREE_OF_A_KIND, [trip_rank] + kickers
-
-    if counts == [2, 2, 1]:
-        pairs = sorted([r for r, c in rank_counts.items() if c == 2], reverse=True)
-        kicker = [r for r, c in rank_counts.items() if c == 1][0]
-        return HandRank.TWO_PAIR, pairs + [kicker]
-
-    if counts == [2, 1, 1, 1]:
-        pair_rank = [r for r, c in rank_counts.items() if c == 2][0]
-        kickers = sorted([r for r, c in rank_counts.items() if c == 1], reverse=True)
-        return HandRank.PAIR, [pair_rank] + kickers
-
-    return HandRank.HIGH_CARD, ranks
+    """Evaluate a poker hand using classic rules."""
+    return ClassicHandEvaluator.evaluate_hand(cards)
 
 
 def compare_hands(hand1: list[str], hand2: list[str]) -> int:
-    """
-    Compare two hands. Returns:
-    - 1 if hand1 wins
-    - -1 if hand2 wins
-    - 0 if tie
-    """
-    rank1, tie1 = evaluate_hand(hand1)
-    rank2, tie2 = evaluate_hand(hand2)
+    """Compare two hands using classic rules."""
+    return ClassicHandEvaluator.compare_hands(hand1, hand2)
 
-    if rank1 > rank2:
-        return 1
-    if rank1 < rank2:
-        return -1
-    if tie1 > tie2:
-        return 1
-    if tie1 < tie2:
-        return -1
-    return 0
 
+# For backward compatibility, keep the internal function
+def _evaluate_five_cards(cards: list[str]) -> tuple[HandRank, list[int]]:
+    """Evaluate exactly 5 cards using classic rules."""
+    return ClassicHandEvaluator._evaluate_five_cards(cards)
+
+
+# =============================================================================
+# Game State and Player
+# =============================================================================
 
 @dataclass
 class GameState:
@@ -172,6 +298,7 @@ class GameState:
     round_name: str  # 'preflop', 'flop', 'turn', 'river'
     min_raise: int  # Minimum raise amount
     is_first_action: bool  # True if first to act this betting round
+    variant: str = "classic"  # 'classic' or 'short_deck'
 
 
 @dataclass
@@ -187,12 +314,20 @@ class Player:
     all_in: bool = False
 
 
+# =============================================================================
+# Game Classes
+# =============================================================================
+
 class TexasHoldemGame:
-    """Manages a single Texas Hold'em hand."""
+    """Manages a single Texas Hold'em hand (classic 52-card variant)."""
 
     SMALL_BLIND = 5
     BIG_BLIND = 10
     STARTING_STACK = 1000
+    VARIANT = "classic"
+
+    # Evaluator class to use (can be overridden by subclasses)
+    evaluator: type[HandEvaluator] = ClassicHandEvaluator
 
     def __init__(self, player1_move: Callable, player2_move: Callable, verbose: bool = False):
         self.players = [
@@ -213,7 +348,7 @@ class TexasHoldemGame:
 
     def reset_hand(self):
         """Reset for a new hand."""
-        self.deck = create_deck()
+        self.deck = self.evaluator.create_deck()
         random.shuffle(self.deck)
         self.community_cards = []
         self.pot = 0
@@ -275,6 +410,7 @@ class TexasHoldemGame:
             round_name=round_name,
             min_raise=self.min_raise,
             is_first_action=is_first,
+            variant=self.VARIANT,
         )
 
         try:
@@ -317,8 +453,6 @@ class TexasHoldemGame:
 
     def execute_action(self, player: Player, action: str) -> bool:
         """Execute player action. Returns True if betting round continues."""
-        opponent = self.players[1 - self.players.index(player)]
-
         if action == "fold":
             player.folded = True
             self.log(f"{player.name} folds")
@@ -451,11 +585,11 @@ class TexasHoldemGame:
         hand1 = p1.hole_cards + self.community_cards
         hand2 = p2.hole_cards + self.community_cards
 
-        result = compare_hands(hand1, hand2)
+        result = self.evaluator.compare_hands(hand1, hand2)
 
-        self.log(f"Showdown:")
-        self.log(f"  {p1.name}: {p1.hole_cards} -> {evaluate_hand(hand1)}")
-        self.log(f"  {p2.name}: {p2.hole_cards} -> {evaluate_hand(hand2)}")
+        self.log("Showdown:")
+        self.log(f"  {p1.name}: {p1.hole_cards} -> {self.evaluator.evaluate_hand(hand1)}")
+        self.log(f"  {p2.name}: {p2.hole_cards} -> {self.evaluator.evaluate_hand(hand2)}")
 
         if result > 0:
             return 0
@@ -469,7 +603,7 @@ class TexasHoldemGame:
         self.deal_hole_cards()
         self.post_blinds()
 
-        self.log(f"\n=== New Hand ===")
+        self.log(f"\n=== New Hand ({self.VARIANT}) ===")
         self.log(f"Button: {self.players[self.button].name}")
         self.log(f"{self.players[0].name}: {self.players[0].hole_cards}")
         self.log(f"{self.players[1].name}: {self.players[1].hole_cards}")
@@ -523,6 +657,24 @@ class TexasHoldemGame:
         return winner
 
 
+class ShortDeckHoldemGame(TexasHoldemGame):
+    """
+    Short-deck (Six-plus) Hold'em variant.
+
+    Key differences:
+    - 36-card deck (6 through Ace)
+    - Flush beats Full House
+    - A-6-7-8-9 is the lowest straight
+    """
+
+    VARIANT = "short_deck"
+    evaluator: type[HandEvaluator] = ShortDeckHandEvaluator
+
+
+# =============================================================================
+# Bot Loading and Main
+# =============================================================================
+
 def load_bot(bot_path: str) -> Callable:
     """Load a bot's get_move function from a Python file."""
     spec = importlib.util.spec_from_file_location("bot_module", bot_path)
@@ -544,14 +696,25 @@ def main():
     parser.add_argument("players", nargs=2, help="Paths to player bot files")
     parser.add_argument("-r", "--rounds", type=int, default=100, help="Number of hands to play")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print detailed game log")
+    parser.add_argument(
+        "--variant",
+        choices=["classic", "short_deck"],
+        default="classic",
+        help="Game variant: classic (52-card) or short_deck (36-card, 6-A)",
+    )
     args = parser.parse_args()
 
     # Load bot modules
     bot1 = load_bot(args.players[0])
     bot2 = load_bot(args.players[1])
 
+    # Select game class based on variant
+    if args.variant == "short_deck":
+        game = ShortDeckHoldemGame(bot1, bot2, verbose=args.verbose)
+    else:
+        game = TexasHoldemGame(bot1, bot2, verbose=args.verbose)
+
     scores = {"player1": 0, "player2": 0, "draw": 0}
-    game = TexasHoldemGame(bot1, bot2, verbose=args.verbose)
 
     for hand_num in range(args.rounds):
         winner = game.play_hand()
@@ -566,9 +729,9 @@ def main():
         # Alternate button
         game.button = 1 - game.button
 
-        # Reset stacks for next hand (optional: could play with chip accumulation)
-        game.players[0].stack = TexasHoldemGame.STARTING_STACK
-        game.players[1].stack = TexasHoldemGame.STARTING_STACK
+        # Reset stacks for next hand
+        game.players[0].stack = game.STARTING_STACK
+        game.players[1].stack = game.STARTING_STACK
 
     # Output in required format
     print()

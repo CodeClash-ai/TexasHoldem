@@ -2,6 +2,10 @@
 
 A heads-up (2-player) No-Limit Texas Hold'em poker engine for CodeClash AI competitions.
 
+Supports two variants:
+- **Classic** (52-card deck) - Standard Texas Hold'em
+- **Short-deck / Six-plus** (36-card deck) - Popular variant with modified hand rankings
+
 ## Game Overview
 
 Texas Hold'em is the most popular poker variant worldwide. In this heads-up format:
@@ -31,6 +35,37 @@ Texas Hold'em is the most popular poker variant worldwide. In this heads-up form
 - **Blinds**: Small blind = 5, Big blind = 10
 - **Starting Stack**: 1000 chips per hand
 - **No-Limit**: Players can bet any amount up to their stack
+
+## Short-Deck (Six-Plus) Variant
+
+Short-deck Hold'em uses a 36-card deck (6 through Ace, removing 2-5) with modified rules:
+
+### Key Differences
+
+| Feature | Classic | Short-Deck |
+|---------|---------|------------|
+| Deck size | 52 cards (2-A) | 36 cards (6-A) |
+| Lowest straight | A-2-3-4-5 | A-6-7-8-9 |
+| Flush vs Full House | Full House wins | **Flush wins** |
+
+### Short-Deck Hand Rankings
+
+| Rank | Hand | Notes |
+|------|------|-------|
+| 10 | Royal Flush | T-J-Q-K-A (same suit) |
+| 9 | Straight Flush | Any 5 consecutive same suit |
+| 8 | Four of a Kind | Same as classic |
+| 7 | **Flush** | **Beats Full House** (harder to make) |
+| 6 | **Full House** | **Loses to Flush** |
+| 5 | Straight | A-6-7-8-9 is the wheel |
+| 4 | Three of a Kind | Same as classic |
+| 3 | Two Pair | Same as classic |
+| 2 | One Pair | Same as classic |
+| 1 | High Card | Same as classic |
+
+### Why Flush Beats Full House
+
+With only 9 cards per suit (vs 13 in classic), flushes are significantly harder to make, while full houses remain relatively common. This adjusted ranking reflects true hand probabilities.
 
 ## Repository Structure
 
@@ -64,6 +99,7 @@ def get_move(state) -> str:
             - round_name: str            # 'preflop', 'flop', 'turn', 'river'
             - min_raise: int             # Minimum raise amount
             - is_first_action: bool      # True if first to act this betting round
+            - variant: str               # 'classic' or 'short_deck'
 
     Returns:
         str: One of the following actions:
@@ -79,10 +115,11 @@ def get_move(state) -> str:
 ### Card Notation
 
 Cards are represented as 2-character strings:
-- **Ranks**: `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `T` (10), `J`, `Q`, `K`, `A`
+- **Ranks (Classic)**: `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `T` (10), `J`, `Q`, `K`, `A`
+- **Ranks (Short-deck)**: `6`, `7`, `8`, `9`, `T` (10), `J`, `Q`, `K`, `A` (no 2-5)
 - **Suits**: `c` (clubs), `d` (diamonds), `h` (hearts), `s` (spades)
 
-Examples: `'As'` = Ace of spades, `'Th'` = Ten of hearts, `'2c'` = Two of clubs
+Examples: `'As'` = Ace of spades, `'Th'` = Ten of hearts, `'6c'` = Six of clubs
 
 ### Example Game State
 
@@ -101,7 +138,7 @@ state.min_raise = 40                   # Minimum raise is 40 more
 ## Running Games Locally
 
 ```bash
-# Run a quick test (5 hands)
+# Run a quick test (5 hands) - Classic variant
 python engine.py main.py main.py -r 5
 
 # Run with verbose output
@@ -109,12 +146,15 @@ python engine.py main.py main.py -r 10 -v
 
 # Run a full match (100 hands)
 python engine.py path/to/bot1.py path/to/bot2.py -r 100
+
+# Run Short-Deck variant
+python engine.py main.py main.py -r 10 --variant short_deck -v
 ```
 
 ### Command Line Arguments
 
 ```
-usage: engine.py [-h] [-r ROUNDS] [-v] players players
+usage: engine.py [-h] [-r ROUNDS] [-v] [--variant {classic,short_deck}] players players
 
 positional arguments:
   players               Paths to player bot files
@@ -122,6 +162,7 @@ positional arguments:
 optional arguments:
   -r, --rounds ROUNDS   Number of hands to play (default: 100)
   -v, --verbose         Print detailed game log
+  --variant             Game variant: classic (52-card) or short_deck (36-card)
 ```
 
 ## Strategy Tips
