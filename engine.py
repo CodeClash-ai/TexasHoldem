@@ -25,8 +25,10 @@ from typing import Callable
 # Hand Rankings
 # =============================================================================
 
+
 class HandRank(IntEnum):
     """Standard poker hand rankings."""
+
     HIGH_CARD = 0
     PAIR = 1
     TWO_PAIR = 2
@@ -41,13 +43,14 @@ class HandRank(IntEnum):
 
 class ShortDeckHandRank(IntEnum):
     """Short-deck hand rankings (flush beats full house)."""
+
     HIGH_CARD = 0
     PAIR = 1
     TWO_PAIR = 2
     THREE_OF_A_KIND = 3
     STRAIGHT = 4
     FULL_HOUSE = 5  # Full house is BELOW flush in short deck
-    FLUSH = 6       # Flush is ABOVE full house in short deck
+    FLUSH = 6  # Flush is ABOVE full house in short deck
     FOUR_OF_A_KIND = 7
     STRAIGHT_FLUSH = 8
     ROYAL_FLUSH = 9
@@ -56,6 +59,7 @@ class ShortDeckHandRank(IntEnum):
 # =============================================================================
 # Hand Evaluator Classes
 # =============================================================================
+
 
 class HandEvaluator(ABC):
     """Abstract base class for poker hand evaluation."""
@@ -134,7 +138,9 @@ class HandEvaluator(ABC):
             wheel_ranks = cls.get_wheel_ranks()
             if sorted_ranks == wheel_ranks:
                 is_straight = True
-                straight_high = wheel_ranks[-2]  # Second highest is the "high" for wheel
+                straight_high = wheel_ranks[
+                    -2
+                ]  # Second highest is the "high" for wheel
 
         counts = sorted(rank_counts.values(), reverse=True)
 
@@ -142,7 +148,7 @@ class HandEvaluator(ABC):
         if is_straight and is_flush:
             # Royal flush check: highest straight flush
             ace_index = len(cls.RANKS) - 1
-            ten_index = cls.RANKS.index('T')
+            ten_index = cls.RANKS.index("T")
             if straight_high == ace_index and ten_index in ranks:
                 return HandRankEnum.ROYAL_FLUSH, [straight_high]
             return HandRankEnum.STRAIGHT_FLUSH, [straight_high]
@@ -165,7 +171,9 @@ class HandEvaluator(ABC):
 
         if counts == [3, 1, 1]:
             trip_rank = [r for r, c in rank_counts.items() if c == 3][0]
-            kickers = sorted([r for r, c in rank_counts.items() if c == 1], reverse=True)
+            kickers = sorted(
+                [r for r, c in rank_counts.items() if c == 1], reverse=True
+            )
             return HandRankEnum.THREE_OF_A_KIND, [trip_rank] + kickers
 
         if counts == [2, 2, 1]:
@@ -175,7 +183,9 @@ class HandEvaluator(ABC):
 
         if counts == [2, 1, 1, 1]:
             pair_rank = [r for r, c in rank_counts.items() if c == 2][0]
-            kickers = sorted([r for r, c in rank_counts.items() if c == 1], reverse=True)
+            kickers = sorted(
+                [r for r, c in rank_counts.items() if c == 1], reverse=True
+            )
             return HandRankEnum.PAIR, [pair_rank] + kickers
 
         return HandRankEnum.HIGH_CARD, ranks
@@ -282,6 +292,7 @@ def _evaluate_five_cards(cards: list[str]) -> tuple[HandRank, list[int]]:
 # Game State and Player
 # =============================================================================
 
+
 @dataclass
 class GameState:
     """State passed to bot's get_move function."""
@@ -318,6 +329,7 @@ class Player:
 # Game Classes
 # =============================================================================
 
+
 class TexasHoldemGame:
     """Manages a single Texas Hold'em hand (classic 52-card variant)."""
 
@@ -329,7 +341,9 @@ class TexasHoldemGame:
     # Evaluator class to use (can be overridden by subclasses)
     evaluator: type[HandEvaluator] = ClassicHandEvaluator
 
-    def __init__(self, player1_move: Callable, player2_move: Callable, verbose: bool = False):
+    def __init__(
+        self, player1_move: Callable, player2_move: Callable, verbose: bool = False
+    ):
         self.players = [
             Player("player1", player1_move),
             Player("player2", player2_move),
@@ -393,9 +407,13 @@ class TexasHoldemGame:
         self.log(f"{sb_player.name} posts small blind {sb_amount}")
         self.log(f"{bb_player.name} posts big blind {bb_amount}")
 
-    def get_action(self, player: Player, opponent: Player, round_name: str, is_first: bool) -> str:
+    def get_action(
+        self, player: Player, opponent: Player, round_name: str, is_first: bool
+    ) -> str:
         """Get action from player's bot."""
-        position = "button" if self.players.index(player) == self.button else "big_blind"
+        position = (
+            "button" if self.players.index(player) == self.button else "big_blind"
+        )
 
         state = GameState(
             hole_cards=player.hole_cards.copy(),
@@ -481,7 +499,10 @@ class TexasHoldemGame:
             to_call = self.current_bet - player.current_bet
             min_target = self.current_bet + self.min_raise
 
-            if target_bet < min_target and target_bet < player.stack + player.current_bet:
+            if (
+                target_bet < min_target
+                and target_bet < player.stack + player.current_bet
+            ):
                 target_bet = min_target
 
             raise_amount = target_bet - player.current_bet
@@ -542,7 +563,9 @@ class TexasHoldemGame:
                     break
                 continue
 
-            action = self.get_action(player, opponent, round_name, first_action[current])
+            action = self.get_action(
+                player, opponent, round_name, first_action[current]
+            )
             first_action[current] = False
             continues = self.execute_action(player, action)
             actions_taken += 1
@@ -588,8 +611,12 @@ class TexasHoldemGame:
         result = self.evaluator.compare_hands(hand1, hand2)
 
         self.log("Showdown:")
-        self.log(f"  {p1.name}: {p1.hole_cards} -> {self.evaluator.evaluate_hand(hand1)}")
-        self.log(f"  {p2.name}: {p2.hole_cards} -> {self.evaluator.evaluate_hand(hand2)}")
+        self.log(
+            f"  {p1.name}: {p1.hole_cards} -> {self.evaluator.evaluate_hand(hand1)}"
+        )
+        self.log(
+            f"  {p2.name}: {p2.hole_cards} -> {self.evaluator.evaluate_hand(hand2)}"
+        )
 
         if result > 0:
             return 0
@@ -675,6 +702,7 @@ class ShortDeckHoldemGame(TexasHoldemGame):
 # Bot Loading and Main
 # =============================================================================
 
+
 def load_bot(bot_path: str) -> Callable:
     """Load a bot's get_move function from a Python file."""
     spec = importlib.util.spec_from_file_location("bot_module", bot_path)
@@ -694,8 +722,12 @@ def load_bot(bot_path: str) -> Callable:
 def main():
     parser = argparse.ArgumentParser(description="Texas Hold'em Poker Engine")
     parser.add_argument("players", nargs=2, help="Paths to player bot files")
-    parser.add_argument("-r", "--rounds", type=int, default=100, help="Number of hands to play")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Print detailed game log")
+    parser.add_argument(
+        "-r", "--rounds", type=int, default=100, help="Number of hands to play"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Print detailed game log"
+    )
     parser.add_argument(
         "--variant",
         choices=["classic", "short_deck"],
@@ -738,7 +770,7 @@ def main():
     print("FINAL_RESULTS")
     for i, path in enumerate(args.players):
         name = os.path.basename(os.path.dirname(path))
-        print(f"Bot_{i+1}_main: {scores[f'player{i+1}']} rounds won ({name})")
+        print(f"Bot_{i + 1}_main: {scores[f'player{i + 1}']} rounds won ({name})")
     print(f"Draws: {scores['draw']}")
 
 

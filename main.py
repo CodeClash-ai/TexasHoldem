@@ -16,19 +16,50 @@ from itertools import combinations
 # Hand strength rankings for preflop play
 # Premium hands: Always raise
 PREMIUM_HANDS = {
-    "AA", "KK", "QQ", "JJ", "AKs", "AKo",
+    "AA",
+    "KK",
+    "QQ",
+    "JJ",
+    "AKs",
+    "AKo",
 }
 
 # Strong hands: Raise or call raises
 STRONG_HANDS = {
-    "TT", "99", "AQs", "AQo", "AJs", "KQs",
+    "TT",
+    "99",
+    "AQs",
+    "AQo",
+    "AJs",
+    "KQs",
 }
 
 # Playable hands: Call or raise in position
 PLAYABLE_HANDS = {
-    "88", "77", "66", "ATs", "ATo", "KJs", "KTs", "QJs", "JTs",
-    "A9s", "A8s", "A7s", "A6s", "A5s", "A4s", "A3s", "A2s",
-    "KQo", "QTs", "T9s", "98s", "87s", "76s", "65s",
+    "88",
+    "77",
+    "66",
+    "ATs",
+    "ATo",
+    "KJs",
+    "KTs",
+    "QJs",
+    "JTs",
+    "A9s",
+    "A8s",
+    "A7s",
+    "A6s",
+    "A5s",
+    "A4s",
+    "A3s",
+    "A2s",
+    "KQo",
+    "QTs",
+    "T9s",
+    "98s",
+    "87s",
+    "76s",
+    "65s",
 }
 
 
@@ -53,7 +84,9 @@ def get_hand_category(hole_cards: list[str]) -> str:
     return f"{r1}{r2}{suited}"
 
 
-def evaluate_hand_strength(hole_cards: list[str], community_cards: list[str]) -> tuple[int, list[int]]:
+def evaluate_hand_strength(
+    hole_cards: list[str], community_cards: list[str]
+) -> tuple[int, list[int]]:
     """
     Evaluate hand strength. Returns (hand_rank, tiebreaker).
     Hand ranks: 0=high card, 1=pair, 2=two pair, 3=trips, 4=straight,
@@ -168,13 +201,26 @@ def get_move(state) -> str:
 
     # Preflop strategy
     if round_name == "preflop":
-        return preflop_strategy(hole_cards, position, to_call, pot, player_stack, min_raise, current_bet)
+        return preflop_strategy(
+            hole_cards, position, to_call, pot, player_stack, min_raise, current_bet
+        )
 
     # Postflop strategy
-    return postflop_strategy(hole_cards, community_cards, to_call, pot, player_stack, min_raise, current_bet, round_name)
+    return postflop_strategy(
+        hole_cards,
+        community_cards,
+        to_call,
+        pot,
+        player_stack,
+        min_raise,
+        current_bet,
+        round_name,
+    )
 
 
-def preflop_strategy(hole_cards, position, to_call, pot, stack, min_raise, current_bet) -> str:
+def preflop_strategy(
+    hole_cards, position, to_call, pot, stack, min_raise, current_bet
+) -> str:
     """Preflop betting strategy based on hand strength and position."""
     hand = get_hand_category(hole_cards)
     in_position = position == "button"
@@ -222,7 +268,9 @@ def preflop_strategy(hole_cards, position, to_call, pot, stack, min_raise, curre
     return "fold"
 
 
-def postflop_strategy(hole_cards, community_cards, to_call, pot, stack, min_raise, current_bet, round_name) -> str:
+def postflop_strategy(
+    hole_cards, community_cards, to_call, pot, stack, min_raise, current_bet, round_name
+) -> str:
     """Postflop betting strategy based on made hand strength."""
     hand_rank, _ = evaluate_hand_strength(hole_cards, community_cards)
 
@@ -286,6 +334,7 @@ def postflop_strategy(hole_cards, community_cards, to_call, pot, stack, min_rais
         # Occasional bluff on the river
         if round_name == "river":
             import random
+
             if random.random() < 0.15:
                 return f"raise {int(pot * 0.5)}"
         return "check"
